@@ -64,6 +64,9 @@ export default function ProductsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
+  // Shop state
+  const [shopId, setShopId] = useState<string | null>(null);
+
   // Form Fields
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
@@ -76,10 +79,47 @@ export default function ProductsScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      // 1. Fetch Products
-      const res: any = await authedGet('/product');
-      const list = res?.products || res?.data || (Array.isArray(res) ? res : []);
-      setProducts(list);
+      // 1. Fetch user shop
+      let currentShopId: string | null = null;
+      try {
+        const shopRes: any = await authedGet('/shop');
+        const shops = shopRes?.ownedShops || [];
+        if (shops.length > 0) {
+          currentShopId = shops[0]._id;
+          setShopId(currentShopId);
+        }
+      } catch {
+        // Continue even if shop fetch fails
+      }
+
+      // 2. Fetch Products for current shop (and demo products)
+      let combinedList: Product[] = [];
+      if (currentShopId) {
+        try {
+          const res: any = await authedGet(`/product/all?shopId=${currentShopId}`);
+          const list = res?.products || res?.data || (Array.isArray(res) ? res : []);
+          combinedList = [...list];
+        } catch {
+          // Shop products failed
+        }
+      }
+
+      // Fetch demo products if any
+      try {
+        const demoRes: any = await authedGet('/product/all?demoOnly=true');
+        const demoList = demoRes?.products || demoRes?.data || (Array.isArray(demoRes) ? demoRes : []);
+        // Prevent duplicate IDs if any
+        const existingIds = new Set(combinedList.map((p) => p._id));
+        for (const item of demoList) {
+          if (!existingIds.has(item._id)) {
+            combinedList.push(item);
+          }
+        }
+      } catch {
+        // Demo products optional
+      }
+
+      setProducts(combinedList);
 
       // Check cache metadata
       const cached = await getFromCache('/product');
@@ -87,12 +127,12 @@ export default function ProductsScreen() {
         setLastUpdated(formatSavedAt(cached.savedAt));
       }
 
-      // 2. Fetch Subscription plan to get max products limit
+      // 3. Fetch Subscription plan to get max products limit
       try {
         const subRes: any = await authedGet('/subscription/my');
         const plan = subRes?.subscription?.planId;
         const max = plan?.maxProductsPerShop ?? 15;
-        const ownCount = list.filter((p: Product) => !p.isDemo).length;
+        const ownCount = combinedList.filter((p: Product) => !p.isDemo).length;
         setPlanLimit({
           current: ownCount,
           max: max,
@@ -196,13 +236,19 @@ export default function ProductsScreen() {
 
     setSubmitting(true);
     try {
+      if (!shopId && !editingProduct) {
+        showToast('Please set up or select a shop first', 'error');
+        setSubmitting(false);
+        return;
+      }
+
       if (editingProduct) {
         await authedPut('/product', `/${editingProduct._id}`, {
           name: name.trim(),
           price: Number(price),
           buyingPrice: buyingPrice ? Number(buyingPrice) : undefined,
           stock: Number(stock || 0),
-          description: description.trim(),
+          description: description.trim() || undefined,
         });
         showToast('Product updated successfully', 'success');
       } else {
@@ -212,7 +258,8 @@ export default function ProductsScreen() {
           formData.append('price', price.trim());
           if (buyingPrice) formData.append('buyingPrice', buyingPrice.trim());
           formData.append('stock', stock.trim() || '0');
-          if (description) formData.append('description', description.trim());
+          if (description.trim()) formData.append('description', description.trim());
+          if (shopId) formData.append('shopId', shopId);
 
           const filename = imageUri.split('/').pop() || 'photo.jpg';
           const match = /\.(\w+)$/.exec(filename);
@@ -231,7 +278,8 @@ export default function ProductsScreen() {
             price: Number(price),
             buyingPrice: buyingPrice ? Number(buyingPrice) : undefined,
             stock: Number(stock || 0),
-            description: description.trim(),
+            description: description.trim() || undefined,
+            shopId: shopId,
           });
         }
         showToast('Product added successfully', 'success');

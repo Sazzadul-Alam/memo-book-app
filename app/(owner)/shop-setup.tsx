@@ -50,8 +50,8 @@ export default function ShopSetupScreen() {
     // Check if shop already exists
     (async () => {
       try {
-        const res: any = await authedGet('/shop/my');
-        if (res?.shop || res?.data) {
+        const res: any = await authedGet('/shop');
+        if (res?.ownedShops && res.ownedShops.length > 0) {
           router.replace('/(owner)/products');
         }
       } catch {
@@ -93,7 +93,7 @@ export default function ShopSetupScreen() {
     }
     setLoading(true);
     try {
-      await authedPost('/shop', '/create', {
+      await authedPost('/shop', '', {
         name: businessName.trim(),
         contactNumber: contactNumber.trim(),
         address: {

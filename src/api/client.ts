@@ -34,7 +34,7 @@ async function attemptRefresh(): Promise<string | null> {
     try {
       const refreshToken = await getRefreshToken();
       if (!refreshToken) return null;
-      const res = await fetch(`${USER_BASE}/refresh-token`, {
+      const res = await fetch(`${USER_BASE}/refresh-access-token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-client': 'mobile' },
         body: JSON.stringify({ refresh_token: refreshToken }),

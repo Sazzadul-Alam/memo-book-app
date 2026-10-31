@@ -47,9 +47,11 @@ export default function OwnerProfileScreen() {
         setUserEmail(e);
 
         // Fetch user shop details
-        const shopRes: any = await authedGet('/shop/my');
-        if (shopRes?.shop || shopRes?.data) {
-          setShop(shopRes.shop || shopRes.data);
+        const shopRes: any = await authedGet('/shop');
+        if (shopRes?.ownedShops && shopRes.ownedShops.length > 0) {
+          setShop(shopRes.ownedShops[0]);
+        } else if (shopRes?.shop) {
+          setShop(shopRes.shop);
         }
       } catch {
         // Fallback
