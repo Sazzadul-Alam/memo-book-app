@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Memo Book",
+    "slug": "memo-book",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.codehorizonbd.memobook"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#005C72"
+      },
+      "package": "com.codehorizonbd.memobook"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "memobook",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "owner": "sazzadhagrid",
+    "extra": {
+      "eas": {
+        "projectId": "9497533c-e7ab-4a64-b373-8838b9c15e77"
+      }
+    }
+  }
+}
