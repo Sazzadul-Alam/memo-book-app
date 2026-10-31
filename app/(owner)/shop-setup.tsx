@@ -16,6 +16,8 @@ import { Button } from '../../src/components/Button';
 import { Toast, useToast } from '../../src/components/Toast';
 import { colors, fontSizes, radii, spacing } from '../../src/theme/tokens';
 import { authedGet, authedPost } from '../../src/api/client';
+import { useNetwork } from '../../src/utils/useNetwork';
+import { OfflineBanner } from '../../src/components/OfflineBanner';
 
 const STEPS = [
   { label: 'Identity', icon: 'business-outline' as const },
@@ -24,6 +26,7 @@ const STEPS = [
 ];
 
 export default function ShopSetupScreen() {
+  const { isOnline } = useNetwork();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const { toast, show: showToast, hide: hideToast } = useToast();
@@ -84,6 +87,10 @@ export default function ShopSetupScreen() {
   }
 
   async function handleFinish() {
+    if (!isOnline) {
+      showToast('Internet required to save shop profile', 'error');
+      return;
+    }
     setLoading(true);
     try {
       await authedPost('/shop', '/create', {
@@ -114,6 +121,7 @@ export default function ShopSetupScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <OfflineBanner />
       <Toast {...toast} onHide={hideToast} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

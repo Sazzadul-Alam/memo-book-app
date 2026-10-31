@@ -5,13 +5,13 @@ import {
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Header } from '../../src/components/Header';
@@ -20,8 +20,11 @@ import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { Modal } from '../../src/components/Modal';
 import { Toast, useToast } from '../../src/components/Toast';
+import { OfflineBanner } from '../../src/components/OfflineBanner';
 import { colors, fontSizes, radii, spacing, shadows } from '../../src/theme/tokens';
 import { authedGet, authedPost, authedPut, authedDelete, authedFormPost } from '../../src/api/client';
+import { getFromCache, formatSavedAt } from '../../src/api/cache';
+import { useNetwork } from '../../src/utils/useNetwork';
 
 interface ProductVariant {
   name: string;
@@ -52,6 +55,10 @@ export default function ProductsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [planLimit, setPlanLimit] = useState<PlanLimit>({ current: 0, max: 10, planName: 'Free' });
+  const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  const { isOnline } = useNetwork();
+  const { toast, show: showToast, hide: hideToast } = useToast();
 
   // Modal State for Add / Edit
   const [modalVisible, setModalVisible] = useState(false);
@@ -67,14 +74,18 @@ export default function ProductsScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  const { toast, show: showToast, hide: hideToast } = useToast();
-
   const loadData = useCallback(async () => {
     try {
       // 1. Fetch Products
       const res: any = await authedGet('/product');
       const list = res?.products || res?.data || (Array.isArray(res) ? res : []);
       setProducts(list);
+
+      // Check cache metadata
+      const cached = await getFromCache('/product');
+      if (cached?.savedAt) {
+        setLastUpdated(formatSavedAt(cached.savedAt));
+      }
 
       // 2. Fetch Subscription plan to get max products limit
       try {
@@ -118,7 +129,6 @@ export default function ProductsScreen() {
     });
 
     if (!result.canceled && result.assets[0].uri) {
-      // Compress with expo-image-manipulator
       const manipResult = await ImageManipulator.manipulateAsync(
         result.assets[0].uri,
         [{ resize: { width: 800 } }],
@@ -129,6 +139,10 @@ export default function ProductsScreen() {
   }
 
   function openAddModal() {
+    if (!isOnline) {
+      showToast('Internet required to add products', 'warning');
+      return;
+    }
     if (planLimit.current >= planLimit.max) {
       Alert.alert(
         'Product Limit Reached',
@@ -148,6 +162,10 @@ export default function ProductsScreen() {
   }
 
   function openEditModal(prod: Product) {
+    if (!isOnline) {
+      showToast('Internet required to edit products', 'warning');
+      return;
+    }
     if (prod.isDemo) {
       showToast('Demo products cannot be edited', 'info');
       return;
@@ -164,6 +182,11 @@ export default function ProductsScreen() {
   }
 
   async function handleSaveProduct() {
+    if (!isOnline) {
+      showToast('Internet required to save product', 'warning');
+      return;
+    }
+
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = 'Product name is required';
     if (!price.trim() || isNaN(Number(price))) errs.price = 'Enter a valid price';
@@ -174,7 +197,6 @@ export default function ProductsScreen() {
     setSubmitting(true);
     try {
       if (editingProduct) {
-        // Update product
         await authedPut('/product', `/${editingProduct._id}`, {
           name: name.trim(),
           price: Number(price),
@@ -184,7 +206,6 @@ export default function ProductsScreen() {
         });
         showToast('Product updated successfully', 'success');
       } else {
-        // Create new product
         if (imageUri && !imageUri.startsWith('http')) {
           const formData = new FormData();
           formData.append('name', name.trim());
@@ -226,6 +247,10 @@ export default function ProductsScreen() {
   }
 
   function confirmDelete(prod: Product) {
+    if (!isOnline) {
+      showToast('Internet required to delete products', 'warning');
+      return;
+    }
     if (prod.isDemo) {
       showToast('Demo products cannot be deleted', 'info');
       return;
@@ -254,11 +279,17 @@ export default function ProductsScreen() {
       <Header
         title="Products"
         right={
-          <TouchableOpacity onPress={openAddModal} style={styles.headerAddBtn}>
+          <TouchableOpacity
+            onPress={openAddModal}
+            style={[styles.headerAddBtn, !isOnline && { opacity: 0.5 }]}
+          >
             <Ionicons name="add" size={24} color={colors.white} />
           </TouchableOpacity>
         }
       />
+
+      {/* Persistent Offline Banner */}
+      <OfflineBanner lastUpdated={lastUpdated} />
 
       {/* Plan limit warning banner */}
       <View style={styles.planBanner}>
@@ -285,7 +316,7 @@ export default function ProductsScreen() {
           <Ionicons name="cube-outline" size={54} color={colors.dsOutline} />
           <Text style={styles.emptyTitle}>No products yet</Text>
           <Text style={styles.emptySub}>Add your first product to generate invoices</Text>
-          <Button onPress={openAddModal} style={{ marginTop: spacing[4] }}>
+          <Button onPress={openAddModal} disabled={!isOnline} style={{ marginTop: spacing[4] }}>
             Add Product
           </Button>
         </View>
@@ -298,6 +329,10 @@ export default function ProductsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
+                if (!isOnline) {
+                  showToast('Cannot refresh while offline', 'info');
+                  return;
+                }
                 setRefreshing(true);
                 loadData();
               }}
@@ -311,7 +346,8 @@ export default function ProductsScreen() {
                   <Image
                     source={{ uri: item.images[0].image }}
                     style={styles.prodImg}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    cachePolicy="disk"
                   />
                 ) : (
                   <View style={styles.prodImgPlaceholder}>
@@ -345,13 +381,13 @@ export default function ProductsScreen() {
                 <View style={styles.actionCol}>
                   <TouchableOpacity
                     onPress={() => openEditModal(item)}
-                    style={styles.iconBtn}
+                    style={[styles.iconBtn, !isOnline && { opacity: 0.4 }]}
                   >
                     <Ionicons name="create-outline" size={19} color={colors.dsPrimary} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => confirmDelete(item)}
-                    style={[styles.iconBtn, { marginTop: spacing[2] }]}
+                    style={[styles.iconBtn, { marginTop: spacing[2] }, !isOnline && { opacity: 0.4 }]}
                   >
                     <Ionicons name="trash-outline" size={19} color={colors.dsError} />
                   </TouchableOpacity>
@@ -369,7 +405,6 @@ export default function ProductsScreen() {
         title={editingProduct ? 'Edit Product' : 'Add New Product'}
       >
         <View style={styles.form}>
-          {/* Image Picker */}
           {!editingProduct && (
             <TouchableOpacity onPress={pickAndCompressImage} style={styles.imagePickerBtn}>
               {imageUri ? (

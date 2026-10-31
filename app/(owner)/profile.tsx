@@ -18,6 +18,9 @@ import { Toast, useToast } from '../../src/components/Toast';
 import { colors, fontSizes, radii, spacing, shadows } from '../../src/theme/tokens';
 import { clearSession, getUserName, getUserEmail } from '../../src/utils/session';
 import { authedGet, authedPost } from '../../src/api/client';
+import { clearUserCache } from '../../src/api/cache';
+import { useNetwork } from '../../src/utils/useNetwork';
+import { OfflineBanner } from '../../src/components/OfflineBanner';
 
 interface ShopInfo {
   name: string;
@@ -29,6 +32,7 @@ interface ShopInfo {
 }
 
 export default function OwnerProfileScreen() {
+  const { isOnline } = useNetwork();
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [shop, setShop] = useState<ShopInfo | null>(null);
@@ -67,6 +71,7 @@ export default function OwnerProfileScreen() {
           } catch {
             // Ignore error on logout endpoint
           }
+          await clearUserCache();
           await clearSession();
           router.replace('/(auth)/login');
         },
@@ -76,6 +81,7 @@ export default function OwnerProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <OfflineBanner />
       <Toast {...toast} onHide={hideToast} />
       <Header title="My Profile" />
 

@@ -17,8 +17,11 @@ import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { Modal } from '../../src/components/Modal';
 import { Toast, useToast } from '../../src/components/Toast';
+import { OfflineBanner } from '../../src/components/OfflineBanner';
 import { colors, fontSizes, radii, spacing, shadows } from '../../src/theme/tokens';
 import { authedGet, authedPost } from '../../src/api/client';
+import { getFromCache, formatSavedAt } from '../../src/api/cache';
+import { useNetwork } from '../../src/utils/useNetwork';
 
 interface Plan {
   _id: string;
@@ -48,6 +51,10 @@ export default function PlansScreen() {
   const [currentSub, setCurrentSub] = useState<Subscription | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string>('');
+
+  const { isOnline } = useNetwork();
+  const { toast, show: showToast, hide: hideToast } = useToast();
 
   // Purchase Modal State
   const [modalVisible, setModalVisible] = useState(false);
@@ -57,14 +64,18 @@ export default function PlansScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [referenceError, setReferenceError] = useState('');
 
-  const { toast, show: showToast, hide: hideToast } = useToast();
-
   async function loadData() {
     try {
       // 1. Fetch available plans
       const plansRes: any = await authedGet('/subscription/plans');
       const planList = plansRes?.plans || (Array.isArray(plansRes) ? plansRes : []);
       setPlans(planList);
+
+      // Check cache metadata
+      const cached = await getFromCache('/subscription/plans');
+      if (cached?.savedAt) {
+        setLastUpdated(formatSavedAt(cached.savedAt));
+      }
 
       // 2. Fetch current subscription
       const subRes: any = await authedGet('/subscription/my');
@@ -84,6 +95,10 @@ export default function PlansScreen() {
   }, []);
 
   function openPurchaseModal(plan: Plan) {
+    if (!isOnline) {
+      showToast('Internet required to purchase a plan', 'warning');
+      return;
+    }
     setSelectedPlan(plan);
     setPaymentReference('');
     setReferenceError('');
@@ -91,6 +106,10 @@ export default function PlansScreen() {
   }
 
   async function handlePurchase() {
+    if (!isOnline) {
+      showToast('Internet required to submit payment', 'warning');
+      return;
+    }
     if (!paymentReference.trim()) {
       setReferenceError('Transaction ID / Reference is required');
       return;
@@ -120,6 +139,9 @@ export default function PlansScreen() {
       <Toast {...toast} onHide={hideToast} />
       <Header title="Subscription Plans" />
 
+      {/* Persistent Offline Banner */}
+      <OfflineBanner lastUpdated={lastUpdated} />
+
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.dsPrimary} />
@@ -131,6 +153,10 @@ export default function PlansScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
+                if (!isOnline) {
+                  showToast('Cannot refresh while offline', 'info');
+                  return;
+                }
                 setRefreshing(true);
                 loadData();
               }}
@@ -218,10 +244,10 @@ export default function PlansScreen() {
                 {/* Action button */}
                 <Button
                   variant={isCurrent ? 'outline' : 'primary'}
-                  disabled={isCurrent}
+                  disabled={isCurrent || !isOnline}
                   onPress={() => openPurchaseModal(p)}
                   fullWidth
-                  style={{ marginTop: spacing[4] }}
+                  style={{ marginTop: spacing[4], opacity: !isOnline ? 0.6 : 1 }}
                 >
                   {isCurrent ? 'Current Active' : `Upgrade to ${p.name}`}
                 </Button>
