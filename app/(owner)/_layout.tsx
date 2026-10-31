@@ -58,6 +58,13 @@ export default function OwnerLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="shop-setup"
+        options={{
+          href: null,
+          tabBarStyle: { display: 'none' },
+        }}
+      />
     </Tabs>
   );
 }
