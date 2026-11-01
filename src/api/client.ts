@@ -179,6 +179,22 @@ export async function authedPut<T>(
   );
 }
 
+export async function authedPatch<T>(
+  basePath: string,
+  path: string,
+  body: unknown
+): Promise<T> {
+  return doFetch<T>(
+    `${API_BASE}${basePath}${path}`,
+    {
+      method: 'PATCH',
+      headers: await baseHeaders(true),
+      body: JSON.stringify(body),
+    },
+    true
+  );
+}
+
 export async function authedDelete<T>(basePath: string, path: string): Promise<T> {
   return doFetch<T>(
     `${API_BASE}${basePath}${path}`,

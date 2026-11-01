@@ -1,8 +1,34 @@
-import { Tabs } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../src/theme/tokens';
+import { getRole, getToken } from '../../src/utils/session';
 
 export default function AdminLayout() {
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [token, role] = await Promise.all([getToken(), getRole()]);
+      if (!token) {
+        router.replace('/(auth)/login');
+      } else if (role !== 'admin') {
+        router.replace('/(owner)/products');
+      } else {
+        setChecking(false);
+      }
+    })();
+  }, []);
+
+  if (checking) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.dsBackground }}>
+        <ActivityIndicator size="large" color={colors.dsPrimary} />
+      </View>
+    );
+  }
+
   return (
     <Tabs
       screenOptions={{

@@ -25,7 +25,8 @@
       "expo-router",
       "expo-secure-store",
       "expo-font",
-      "expo-image"
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

@@ -5,7 +5,8 @@ import { colors, fontSizes, radii, spacing } from '../theme/tokens';
 type BadgeVariant = 'primary' | 'success' | 'warning' | 'error' | 'info' | 'neutral' | 'demo';
 
 interface BadgeProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  label?: string;
   variant?: BadgeVariant;
   style?: ViewStyle;
 }
@@ -20,11 +21,12 @@ const badgeColors: Record<BadgeVariant, { bg: string; text: string }> = {
   demo: { bg: '#f3e8ff', text: '#7c3aed' },
 };
 
-export function Badge({ children, variant = 'neutral', style }: BadgeProps) {
-  const { bg, text } = badgeColors[variant];
+export function Badge({ children, label, variant = 'neutral', style }: BadgeProps) {
+  const { bg, text } = badgeColors[variant] || badgeColors.neutral;
+  const content = label !== undefined ? label : children;
   return (
     <View style={[styles.badge, { backgroundColor: bg }, style]}>
-      <Text style={[styles.text, { color: text }]}>{children}</Text>
+      <Text style={[styles.text, { color: text }]}>{content}</Text>
     </View>
   );
 }

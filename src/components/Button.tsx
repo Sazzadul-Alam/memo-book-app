@@ -6,7 +6,9 @@ import {
   StyleSheet,
   ViewStyle,
   TextStyle,
+  View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, radii, fontSizes } from '../theme/tokens';
 
 type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
@@ -14,7 +16,9 @@ type Size = 'sm' | 'md' | 'lg';
 
 interface ButtonProps {
   onPress: () => void;
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  title?: string;
+  leftIcon?: keyof typeof Ionicons.glyphMap;
   variant?: Variant;
   size?: Size;
   loading?: boolean;
@@ -27,6 +31,8 @@ interface ButtonProps {
 export function Button({
   onPress,
   children,
+  title,
+  leftIcon,
   variant = 'primary',
   size = 'md',
   loading = false,
@@ -36,6 +42,8 @@ export function Button({
   fullWidth = false,
 }: ButtonProps) {
   const isDisabled = disabled || loading;
+  const iconColor =
+    variant === 'outline' || variant === 'ghost' ? colors.dsPrimary : colors.white;
 
   return (
     <TouchableOpacity
@@ -57,9 +65,19 @@ export function Button({
           size="small"
         />
       ) : (
-        <Text style={[styles.text, styles[`${variant}Text`], styles[`${size}Text`], textStyle]}>
-          {children}
-        </Text>
+        <View style={styles.contentRow}>
+          {leftIcon ? (
+            <Ionicons
+              name={leftIcon}
+              size={size === 'sm' ? 16 : 18}
+              color={iconColor}
+              style={{ marginRight: 6 }}
+            />
+          ) : null}
+          <Text style={[styles.text, styles[`${variant}Text`], styles[`${size}Text`], textStyle]}>
+            {title !== undefined ? title : children}
+          </Text>
+        </View>
       )}
     </TouchableOpacity>
   );
@@ -71,6 +89,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.md,
+  },
+  contentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fullWidth: { width: '100%' },
   disabled: { opacity: 0.55 },
