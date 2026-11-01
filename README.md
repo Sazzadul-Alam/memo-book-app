@@ -62,3 +62,4 @@ npx eas-cli build -p android --profile preview
 cd mobile
 npx eas-cli build -p android --profile production
 ```
+

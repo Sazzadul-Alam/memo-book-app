@@ -26,7 +26,13 @@ import { colors, fontSizes, radii, spacing } from '../../src/theme/tokens';
 import { authedGet, authedPost, authedPatch, authedDelete } from '../../src/api/client';
 import { getFromCache, formatSavedAt } from '../../src/api/cache';
 import { useNetwork } from '../../src/utils/useNetwork';
-import { shareReceiptPdf, printReceipt, ReceiptData } from '../../src/utils/receiptPrinter';
+import {
+  shareReceiptPdf,
+  printReceipt,
+  printViaBluetoothPos,
+  PaperSize,
+  ReceiptData,
+} from '../../src/utils/receiptPrinter';
 
 interface CartItem {
   cartItemId: string;
@@ -94,6 +100,7 @@ export default function InvoicesScreen() {
   const [activeTab, setActiveTab] = useState<'create' | 'history'>('create');
   const [shop, setShop] = useState<ShopDetails | null>(null);
   const [userPlan, setUserPlan] = useState<any>(null);
+  const [paperSize, setPaperSize] = useState<PaperSize>('58mm');
 
   // ── Create Invoice States ──────────────────────────────────────────────────
   const [customerName, setCustomerName] = useState('');
@@ -342,7 +349,7 @@ export default function InvoicesScreen() {
       resetCreateForm();
 
       if (triggerPrint) {
-        handlePrintOrShare(created, 'print');
+        promptPrintOptions(created);
       }
 
       // Switch to history
@@ -383,7 +390,11 @@ export default function InvoicesScreen() {
     };
   }
 
-  async function handlePrintOrShare(inv: Invoice, action: 'print' | 'share') {
+  async function handlePrintOrShare(
+    inv: Invoice,
+    action: 'bluetooth' | 'system' | 'share',
+    size: PaperSize = paperSize
+  ) {
     // Check Free Plan limit
     const exportPdfAllowed = userPlan?.features?.exportPdf !== false;
     if (userPlan?.name?.toLowerCase().includes('free') && !exportPdfAllowed) {
@@ -397,10 +408,12 @@ export default function InvoicesScreen() {
 
     try {
       const data = buildReceiptData(inv);
-      if (action === 'print') {
-        await printReceipt(data);
+      if (action === 'bluetooth') {
+        await printViaBluetoothPos(data, size);
+      } else if (action === 'system') {
+        await printReceipt(data, size);
       } else {
-        await shareReceiptPdf(data);
+        await shareReceiptPdf(data, size);
       }
 
       // Mark as printed if not already
@@ -415,6 +428,28 @@ export default function InvoicesScreen() {
     } catch (err: any) {
       showToast(err.message ?? 'Failed to print/export receipt', 'error');
     }
+  }
+
+  function promptPrintOptions(inv: Invoice) {
+    Alert.alert(
+      `Print Invoice #${inv.invoiceNumber}`,
+      'Select thermal printing method for your Bluetooth POS machine or printer:',
+      [
+        {
+          text: '🖨️ Bluetooth POS (58mm Roll)',
+          onPress: () => handlePrintOrShare(inv, 'bluetooth', '58mm'),
+        },
+        {
+          text: '🖨️ Bluetooth POS (80mm Roll)',
+          onPress: () => handlePrintOrShare(inv, 'bluetooth', '80mm'),
+        },
+        {
+          text: '📄 Android System Spooler',
+          onPress: () => handlePrintOrShare(inv, 'system', paperSize),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   }
 
   async function handleMarkPaid(inv: Invoice) {
@@ -949,11 +984,24 @@ export default function InvoicesScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
+                    style={[
+                      styles.actionBtnPill,
+                      { borderColor: colors.dsPrimary, backgroundColor: '#E0F2FE' },
+                    ]}
+                    onPress={() => promptPrintOptions(inv)}
+                  >
+                    <Ionicons name="print-outline" size={16} color={colors.dsPrimary} />
+                    <Text style={[styles.actionBtnPillText, { color: colors.dsPrimary, fontWeight: '700' }]}>
+                      Print
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
                     style={styles.actionBtnPill}
                     onPress={() => handlePrintOrShare(inv, 'share')}
                   >
-                    <Ionicons name="share-social-outline" size={16} color={colors.dsPrimary} />
-                    <Text style={styles.actionBtnPillText}>Share PDF</Text>
+                    <Ionicons name="share-social-outline" size={16} color={colors.dsOutline} />
+                    <Text style={styles.actionBtnPillText}>Share</Text>
                   </TouchableOpacity>
 
                   {inv.status !== 'paid' && isOnline ? (
@@ -999,10 +1047,46 @@ export default function InvoicesScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Thermal Roll Selector */}
+            <View style={styles.paperSelectorRow}>
+              <Text style={styles.paperSelectorLabel}>Roll Size:</Text>
+              <TouchableOpacity
+                style={[styles.paperChip, paperSize === '58mm' && styles.paperChipActive]}
+                onPress={() => setPaperSize('58mm')}
+              >
+                <Text
+                  style={[
+                    styles.paperChipText,
+                    paperSize === '58mm' && styles.paperChipTextActive,
+                  ]}
+                >
+                  58mm (Standard POS)
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.paperChip, paperSize === '80mm' && styles.paperChipActive]}
+                onPress={() => setPaperSize('80mm')}
+              >
+                <Text
+                  style={[
+                    styles.paperChipText,
+                    paperSize === '80mm' && styles.paperChipTextActive,
+                  ]}
+                >
+                  80mm (Wide POS)
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {previewInvoice && (
               <ScrollView style={styles.receiptScroll}>
                 {/* Visual POS Receipt Wrapper */}
-                <View style={styles.posReceipt}>
+                <View
+                  style={[
+                    styles.posReceipt,
+                    { maxWidth: paperSize === '58mm' ? 280 : 360, alignSelf: 'center', width: '100%' },
+                  ]}
+                >
                   {/* Shop Branding Header */}
                   <View style={styles.posHeader}>
                     <Text style={styles.posShopName}>{shop?.name || 'Memo Book'}</Text>
@@ -1142,17 +1226,26 @@ export default function InvoicesScreen() {
             {/* Modal Actions */}
             <View style={styles.modalActions}>
               <Button
-                title="Print Receipt"
+                title={`Bluetooth POS (${paperSize})`}
+                leftIcon="bluetooth-outline"
+                style={{ flex: 1.3 }}
+                onPress={() =>
+                  previewInvoice && handlePrintOrShare(previewInvoice, 'bluetooth', paperSize)
+                }
+              />
+              <Button
+                title="System Print"
                 variant="outline"
                 leftIcon="print-outline"
                 style={{ flex: 1 }}
-                onPress={() => previewInvoice && handlePrintOrShare(previewInvoice, 'print')}
+                onPress={() => previewInvoice && handlePrintOrShare(previewInvoice, 'system', paperSize)}
               />
               <Button
-                title="Share PDF"
+                title="PDF"
+                variant="outline"
                 leftIcon="share-social-outline"
-                style={{ flex: 1 }}
-                onPress={() => previewInvoice && handlePrintOrShare(previewInvoice, 'share')}
+                style={{ flex: 0.6 }}
+                onPress={() => previewInvoice && handlePrintOrShare(previewInvoice, 'share', paperSize)}
               />
             </View>
           </View>
@@ -1601,6 +1694,42 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.lg,
     color: colors.dsOnSurface,
   },
+  paperSelectorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    marginTop: 8,
+    backgroundColor: '#F1F5F9',
+    borderRadius: radii.md,
+  },
+  paperSelectorLabel: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 12,
+    color: colors.dsOnSurface,
+  },
+  paperChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: radii.full,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.dsOutlineVariant,
+  },
+  paperChipActive: {
+    backgroundColor: colors.dsPrimary,
+    borderColor: colors.dsPrimary,
+  },
+  paperChipText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 11,
+    color: colors.dsOnSurface,
+  },
+  paperChipTextActive: {
+    fontFamily: 'Inter-Bold',
+    color: colors.white,
+  },
   receiptScroll: {
     maxHeight: 460,
     marginVertical: spacing.sm,
@@ -1608,31 +1737,34 @@ const styles = StyleSheet.create({
   posReceipt: {
     backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: colors.dsOutlineVariant,
-    borderRadius: radii.md,
+    borderColor: '#000000',
+    borderRadius: radii.sm,
     overflow: 'hidden',
   },
   posHeader: {
-    backgroundColor: '#005C72',
-    padding: spacing.md,
+    backgroundColor: colors.white,
+    padding: spacing.sm,
     alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: '#000000',
+    borderStyle: 'dashed',
   },
   posShopName: {
     fontFamily: 'Manrope-Bold',
     fontSize: fontSizes.md,
-    color: colors.white,
+    color: '#000000',
+    letterSpacing: 0.5,
   },
   posShopAddr: {
     fontFamily: 'Inter-Regular',
     fontSize: 11,
-    color: colors.white,
-    opacity: 0.9,
+    color: '#333333',
     marginTop: 2,
   },
   posShopPhone: {
     fontFamily: 'Inter-SemiBold',
     fontSize: 11,
-    color: colors.white,
+    color: '#333333',
     marginTop: 2,
   },
   posTag: {
