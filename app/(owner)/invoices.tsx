@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -161,13 +161,19 @@ export default function InvoicesScreen() {
     })();
   }, []);
 
+  // Concurrency guard refs to prevent infinite loop or duplicate requests
+  const isFetchingHistoryRef = useRef(false);
+  const isFetchingProductsRef = useRef(false);
+
   // Load products for shop
   const loadProducts = useCallback(async () => {
-    if (!shop?._id) return;
+    const shopId = shop?._id;
+    if (!shopId || isFetchingProductsRef.current) return;
+    isFetchingProductsRef.current = true;
     try {
       let combined: ProductItem[] = [];
       try {
-        const res: any = await authedGet(`/product/all?shopId=${shop._id}`);
+        const res: any = await authedGet(`/product/all?shopId=${shopId}`);
         const list = res?.products || res?.data || (Array.isArray(res) ? res : []);
         combined = [...list];
       } catch {}
@@ -186,51 +192,59 @@ export default function InvoicesScreen() {
       setProducts(combined);
     } catch {
       // Products fetch fallback
+    } finally {
+      isFetchingProductsRef.current = false;
     }
-  }, [shop]);
+  }, [shop?._id]);
 
   useEffect(() => {
     if (shop?._id) {
       loadProducts();
     }
-  }, [shop, loadProducts]);
+  }, [shop?._id, loadProducts]);
 
   // Load invoices history
-  const loadHistory = useCallback(async () => {
-    if (!shop?._id) return;
-    setLoadingHistory(true);
-    try {
-      const endpoint = `/invoice/shop/${shop._id}`;
-      const res: any = await authedGet(endpoint);
-      const list = res?.invoices || [];
-      setInvoices(list);
-
-      // Check cache metadata
-      const cached = await getFromCache(endpoint);
-      if (cached?.savedAt) {
-        setLastUpdated(formatSavedAt(cached.savedAt));
-      }
-
-      // Load stats
+  const loadHistory = useCallback(
+    async (force = false) => {
+      const shopId = shop?._id;
+      if (!shopId || (!force && isFetchingHistoryRef.current)) return;
+      isFetchingHistoryRef.current = true;
+      setLoadingHistory(true);
       try {
-        const statsRes: any = await authedGet(`/invoice/shop/${shop._id}/stats`);
-        if (statsRes?.stats) {
-          setStats(statsRes.stats);
+        const endpoint = `/invoice/shop/${shopId}`;
+        const res: any = await authedGet(endpoint);
+        const list = res?.invoices || [];
+        setInvoices(list);
+
+        // Check cache metadata
+        const cached = await getFromCache(endpoint);
+        if (cached?.savedAt) {
+          setLastUpdated(formatSavedAt(cached.savedAt));
         }
-      } catch {}
-    } catch (err: any) {
-      showToast(err.message ?? 'Failed to load invoices', 'error');
-    } finally {
-      setLoadingHistory(false);
-      setRefreshingHistory(false);
-    }
-  }, [shop, showToast]);
+
+        // Load stats
+        try {
+          const statsRes: any = await authedGet(`/invoice/shop/${shopId}/stats`);
+          if (statsRes?.stats) {
+            setStats(statsRes.stats);
+          }
+        } catch {}
+      } catch (err: any) {
+        showToast(err.message ?? 'Failed to load invoices', 'error');
+      } finally {
+        setLoadingHistory(false);
+        setRefreshingHistory(false);
+        isFetchingHistoryRef.current = false;
+      }
+    },
+    [shop?._id, showToast]
+  );
 
   useEffect(() => {
     if (activeTab === 'history' && shop?._id) {
       loadHistory();
     }
-  }, [activeTab, shop, loadHistory]);
+  }, [activeTab, shop?._id, loadHistory]);
 
   // Calculations for create invoice
   const subtotal = useMemo(() => {
@@ -538,7 +552,7 @@ export default function InvoicesScreen() {
           <Ionicons
             name="add-circle-outline"
             size={18}
-            color={activeTab === 'create' ? colors.dsPrimary : colors.dsOutline}
+            color={activeTab === 'create' ? colors.white : colors.dsOutline}
           />
           <Text
             style={[styles.tabButtonText, activeTab === 'create' && styles.tabButtonTextActive]}
@@ -555,7 +569,7 @@ export default function InvoicesScreen() {
           <Ionicons
             name="list-outline"
             size={18}
-            color={activeTab === 'history' ? colors.dsPrimary : colors.dsOutline}
+            color={activeTab === 'history' ? colors.white : colors.dsOutline}
           />
           <Text
             style={[styles.tabButtonText, activeTab === 'history' && styles.tabButtonTextActive]}
@@ -855,7 +869,7 @@ export default function InvoicesScreen() {
               onRefresh={() => {
                 if (isOnline) {
                   setRefreshingHistory(true);
-                  loadHistory();
+                  loadHistory(true);
                 } else {
                   showToast('Pull-to-refresh disabled while offline', 'info');
                 }
@@ -966,7 +980,7 @@ export default function InvoicesScreen() {
                 ) : null}
 
                 <View style={styles.invItemsPreview}>
-                  <Text style={styles.invItemsCount}>{inv.items.length} item(s)</Text>
+                  <Text style={styles.invItemsCount}>{inv.items?.length ?? 0} item(s)</Text>
                   <Text style={styles.invTotalAmount}>৳{inv.grandTotal.toFixed(2)}</Text>
                 </View>
 
@@ -1148,7 +1162,7 @@ export default function InvoicesScreen() {
                     </Text>
                   </View>
 
-                  {previewInvoice.items.map((it, idx) => (
+                  {previewInvoice.items?.map((it, idx) => (
                     <View key={idx} style={styles.posItemRow}>
                       <Text style={[styles.posItemText, { flex: 1 }]}>{it.name}</Text>
                       <Text style={[styles.posItemText, { width: 36, textAlign: 'center' }]}>
@@ -1275,12 +1289,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.xs,
-    paddingVertical: spacing.sm,
+    paddingVertical: 10,
     borderRadius: radii.md,
-    backgroundColor: colors.dsSurfaceContainerLowest,
+    backgroundColor: '#F1F5F9',
   },
   tabButtonActive: {
-    backgroundColor: colors.dsPrimaryContainer,
+    backgroundColor: colors.dsPrimary,
   },
   tabButtonText: {
     fontFamily: 'Inter-Medium',
@@ -1288,8 +1302,8 @@ const styles = StyleSheet.create({
     color: colors.dsOutline,
   },
   tabButtonTextActive: {
-    fontFamily: 'Inter-SemiBold',
-    color: colors.dsPrimary,
+    fontFamily: 'Inter-Bold',
+    color: colors.white,
   },
   scrollContent: {
     padding: spacing.md,

@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
 });
 
 // ── useToast hook ─────────────────────────────────────────────────────────────
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 
 export function useToast() {
   const [toast, setToast] = useState<{ message: string; type: ToastType; visible: boolean }>({
@@ -85,10 +85,13 @@ export function useToast() {
     visible: false,
   });
 
-  const show = (message: string, type: ToastType = 'info') =>
+  const show = useCallback((message: string, type: ToastType = 'info') => {
     setToast({ message, type, visible: true });
+  }, []);
 
-  const hide = () => setToast((t) => ({ ...t, visible: false }));
+  const hide = useCallback(() => {
+    setToast((t) => ({ ...t, visible: false }));
+  }, []);
 
   return { toast, show, hide };
 }
