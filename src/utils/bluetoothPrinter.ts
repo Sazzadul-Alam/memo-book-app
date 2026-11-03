@@ -1,3 +1,4 @@
+import { Platform, PermissionsAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ThermalPrinter, {
   text,
@@ -17,10 +18,52 @@ export interface PrinterDevice {
 }
 
 /**
+ * Request runtime permissions for Bluetooth scanning and connecting on Android
+ */
+export async function requestBluetoothPermissions(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+
+  try {
+    if (Platform.Version >= 31) {
+      const results = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      ]);
+
+      const scanGranted =
+        results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED;
+      const connectGranted =
+        results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED;
+
+      return scanGranted && connectGranted;
+    } else {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: 'Location Permission for Bluetooth',
+          message: 'Bluetooth scanning requires location permission on your device.',
+          buttonPositive: 'Allow',
+        }
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    }
+  } catch (err) {
+    console.warn('Bluetooth permission request failed:', err);
+    return false;
+  }
+}
+
+/**
  * Scan for paired and nearby Bluetooth POS printers
  */
 export async function scanPrinters(): Promise<{ paired: PrinterDevice[]; found: PrinterDevice[] }> {
   try {
+    const hasPermission = await requestBluetoothPermissions();
+    if (!hasPermission) {
+      throw new Error('Bluetooth permission not granted. Please allow Bluetooth permissions in App Settings.');
+    }
+
     const result = await ThermalPrinter.scan();
     return {
       paired: result.paired || [],
@@ -37,6 +80,8 @@ export async function scanPrinters(): Promise<{ paired: PrinterDevice[]; found: 
  */
 export async function connectPrinter(address: string): Promise<boolean> {
   try {
+    await requestBluetoothPermissions();
+
     // If the address doesn't specify transport prefix, prefix it with 'bt:' for Bluetooth Classic
     const formattedAddress =
       address.startsWith('bt:') || address.startsWith('ble:') || address.startsWith('tcp:')
@@ -86,13 +131,19 @@ export async function printReceiptBluetooth(
   paperSize: PaperSize = '58mm',
   targetAddress?: string
 ): Promise<void> {
+  const hasPermission = await requestBluetoothPermissions();
+  if (!hasPermission) {
+    throw new Error('Bluetooth permission not granted. Please allow Bluetooth permissions in App Settings.');
+  }
+
   let address = targetAddress || (await getSavedPrinter());
 
   if (!address) {
     // Attempt auto-discovery of paired devices
-    const { paired } = await scanPrinters();
-    if (paired.length > 0) {
-      address = paired[0].address;
+    const { paired, found } = await scanPrinters();
+    const all = [...paired, ...found];
+    if (all.length > 0) {
+      address = all[0].address;
     } else {
       throw new Error('NO_PRINTER_PAIRED');
     }
@@ -107,7 +158,7 @@ export async function printReceiptBluetooth(
   try {
     await ThermalPrinter.connect(formattedAddress, { timeout: 10000 });
   } catch (connectErr: any) {
-    // If already connected, continuing is fine; otherwise throw
+    // If already connected, continuing is fine; otherwise log
     const msg = String(connectErr?.message || '');
     if (!msg.toLowerCase().includes('already connected')) {
       console.warn('Connect check failed, attempting print anyway:', msg);

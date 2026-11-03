@@ -15,7 +15,15 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#005C72"
       },
-      "package": "com.codehorizonbd.memobook"
+      "package": "com.codehorizonbd.memobook",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
