@@ -429,51 +429,36 @@ export function generateReceiptHtml(data: ReceiptData, paperSize: PaperSize = '5
 }
 
 /**
- * Direct Print to Bluetooth POS Printer using RawBT URL scheme or Intent
- * This is the #1 standard for Android Bluetooth thermal receipt printers.
+ * Direct Print to Bluetooth POS Printer
+ * Prints directly using internal Bluetooth Classic / BLE without any external apps (no RawBT needed).
  */
 export async function printViaBluetoothPos(data: ReceiptData, paperSize: PaperSize = '58mm'): Promise<boolean> {
-  const textReceipt = generateReceiptText(data, paperSize);
-
-  if (Platform.OS === 'android') {
-    const base64Text = encodeBase64(textReceipt);
-    const rawbtUrl = `rawbt:base64,${base64Text}`;
-    const intentUrl = `intent:base64,${base64Text}#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;`;
-
-    try {
-      const canOpen = await Linking.canOpenURL(rawbtUrl).catch(() => false);
-      if (canOpen) {
-        await Linking.openURL(rawbtUrl);
-        return true;
-      }
-
-      // Try Android intent URL
-      await Linking.openURL(intentUrl);
-      return true;
-    } catch {
-      // RawBT not installed; prompt user
+  try {
+    const { printReceiptBluetooth } = require('./bluetoothPrinter');
+    await printReceiptBluetooth(data, paperSize);
+    return true;
+  } catch (err: any) {
+    if (err?.message === 'NO_PRINTER_PAIRED') {
       Alert.alert(
-        'Bluetooth Thermal Printer',
-        'Direct Bluetooth POS printing works seamlessly with the free "RawBT Print Service" app or the Android System Print Spooler.\n\nChoose an option:',
-        [
-          {
-            text: 'Android Print Dialog',
-            onPress: () => printReceipt(data, paperSize),
-          },
-          {
-            text: 'Get RawBT App (Play Store)',
-            onPress: () =>
-              Linking.openURL('https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter').catch(() => {}),
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ]
+        'No Bluetooth Printer Found',
+        'Please pair your Bluetooth POS printer in Android Bluetooth Settings first, then tap Print.',
+        [{ text: 'OK' }]
       );
       return false;
     }
-  } else {
-    // iOS / Fallback to system print
-    await printReceipt(data, paperSize);
-    return true;
+
+    Alert.alert(
+      'Print Error',
+      `Failed to print to Bluetooth printer: ${err?.message || err}. Would you like to use Android System Print instead?`,
+      [
+        {
+          text: 'Android Print Dialog',
+          onPress: () => printReceipt(data, paperSize),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+    return false;
   }
 }
 
