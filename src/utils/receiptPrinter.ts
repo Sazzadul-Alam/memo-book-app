@@ -432,10 +432,14 @@ export function generateReceiptHtml(data: ReceiptData, paperSize: PaperSize = '5
  * Direct Print to Bluetooth POS Printer
  * Prints directly using internal Bluetooth Classic / BLE without any external apps (no RawBT needed).
  */
-export async function printViaBluetoothPos(data: ReceiptData, paperSize: PaperSize = '58mm'): Promise<boolean> {
+export async function printViaBluetoothPos(
+  data: ReceiptData,
+  paperSize: PaperSize = '58mm',
+  onStatusUpdate?: (status: string) => void
+): Promise<boolean> {
   try {
     const { printReceiptBluetooth } = require('./bluetoothPrinter');
-    await printReceiptBluetooth(data, paperSize);
+    await printReceiptBluetooth(data, paperSize, undefined, onStatusUpdate);
     return true;
   } catch (err: any) {
     if (err?.message === 'NO_PRINTER_PAIRED') {

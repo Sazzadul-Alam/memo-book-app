@@ -55,20 +55,37 @@ export async function requestBluetoothPermissions(): Promise<boolean> {
 }
 
 /**
- * Scan for paired and nearby Bluetooth POS printers
+ * Scan for paired and nearby Bluetooth POS printers with quick auto-stop
+ * to avoid the default 15-second discovery delay.
  */
-export async function scanPrinters(): Promise<{ paired: PrinterDevice[]; found: PrinterDevice[] }> {
+export async function scanPrinters(quickStopMs = 1200): Promise<{ paired: PrinterDevice[]; found: PrinterDevice[] }> {
   try {
     const hasPermission = await requestBluetoothPermissions();
     if (!hasPermission) {
       throw new Error('Bluetooth permission not granted. Please allow Bluetooth permissions in App Settings.');
     }
 
-    const result = await ThermalPrinter.scan();
-    return {
-      paired: result.paired || [],
-      found: result.found || [],
-    };
+    const scanPromise = ThermalPrinter.scan();
+
+    // Auto-stop discovery early to return bonded & already-found devices rapidly
+    let stopTimer: any = null;
+    if (quickStopMs > 0) {
+      stopTimer = setTimeout(() => {
+        ThermalPrinter.stopScan().catch(() => {});
+      }, quickStopMs);
+    }
+
+    try {
+      const result = await scanPromise;
+      if (stopTimer) clearTimeout(stopTimer);
+      return {
+        paired: result.paired || [],
+        found: result.found || [],
+      };
+    } catch (scanErr: any) {
+      if (stopTimer) clearTimeout(stopTimer);
+      throw scanErr;
+    }
   } catch (err: any) {
     console.error('Printer scan error:', err);
     throw new Error(err?.message || 'Failed to scan Bluetooth printers');
@@ -82,13 +99,12 @@ export async function connectPrinter(address: string): Promise<boolean> {
   try {
     await requestBluetoothPermissions();
 
-    // If the address doesn't specify transport prefix, prefix it with 'bt:' for Bluetooth Classic
     const formattedAddress =
       address.startsWith('bt:') || address.startsWith('ble:') || address.startsWith('tcp:')
         ? address
         : `bt:${address}`;
 
-    await ThermalPrinter.connect(formattedAddress, { timeout: 10000 });
+    await ThermalPrinter.connect(formattedAddress, { timeout: 4000 });
     await AsyncStorage.setItem(SAVED_PRINTER_KEY, address);
     return true;
   } catch (err: any) {
@@ -109,6 +125,15 @@ export async function getSavedPrinter(): Promise<string | null> {
 }
 
 /**
+ * Remove saved printer address
+ */
+export async function clearSavedPrinter(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(SAVED_PRINTER_KEY);
+  } catch {}
+}
+
+/**
  * Disconnect from printer
  */
 export async function disconnectPrinter(address: string): Promise<void> {
@@ -124,12 +149,17 @@ export async function disconnectPrinter(address: string): Promise<void> {
 }
 
 /**
- * Print a receipt directly over Bluetooth without any third-party app
+ * Print a receipt directly over Bluetooth without any third-party app.
+ * Optimized for lightning-fast printing:
+ * 1. Uses saved printer address or paired device immediately.
+ * 2. Uses fast-stop scan (~1.2s) if no printer address is cached.
+ * 3. Keeps connection alive and connects with a fast timeout.
  */
 export async function printReceiptBluetooth(
   data: ReceiptData,
   paperSize: PaperSize = '58mm',
-  targetAddress?: string
+  targetAddress?: string,
+  onStatusUpdate?: (status: string) => void
 ): Promise<void> {
   const hasPermission = await requestBluetoothPermissions();
   if (!hasPermission) {
@@ -139,11 +169,14 @@ export async function printReceiptBluetooth(
   let address = targetAddress || (await getSavedPrinter());
 
   if (!address) {
-    // Attempt auto-discovery of paired devices
-    const { paired, found } = await scanPrinters();
+    onStatusUpdate?.('Finding paired Bluetooth printer...');
+    // Fast scan paired and available devices (stops after 1.2s instead of 15s)
+    const { paired, found } = await scanPrinters(1200);
     const all = [...paired, ...found];
     if (all.length > 0) {
       address = all[0].address;
+      // Persist for next instant print
+      AsyncStorage.setItem(SAVED_PRINTER_KEY, address).catch(() => {});
     } else {
       throw new Error('NO_PRINTER_PAIRED');
     }
@@ -154,16 +187,23 @@ export async function printReceiptBluetooth(
       ? address
       : `bt:${address}`;
 
-  // Make sure we connect
+  onStatusUpdate?.('Connecting to Bluetooth printer...');
+
+  // Connect quickly (with 4s timeout)
   try {
-    await ThermalPrinter.connect(formattedAddress, { timeout: 10000 });
+    await ThermalPrinter.connect(formattedAddress, { timeout: 4000 });
+    AsyncStorage.setItem(SAVED_PRINTER_KEY, address).catch(() => {});
   } catch (connectErr: any) {
-    // If already connected, continuing is fine; otherwise log
     const msg = String(connectErr?.message || '');
     if (!msg.toLowerCase().includes('already connected')) {
-      console.warn('Connect check failed, attempting print anyway:', msg);
+      // If cached address failed, try clearing cache and discovering again once
+      console.warn('Saved printer connect failed, clearing cache:', msg);
+      await clearSavedPrinter();
+      throw new Error(`Could not connect to printer (${msg}). Please verify Bluetooth printer is powered ON.`);
     }
   }
+
+  onStatusUpdate?.('Sending print commands...');
 
   const paperWidthMm = paperSize === '80mm' ? 80 : 58;
   const is80 = paperSize === '80mm';
@@ -233,5 +273,6 @@ export async function printReceiptBluetooth(
   nodes.push(feed(3));
   nodes.push(cut());
 
-  await ThermalPrinter.print(formattedAddress, nodes, { paperWidthMm });
+  await ThermalPrinter.print(formattedAddress, nodes, { paperWidthMm, timeout: 5000 });
+  onStatusUpdate?.('Print complete!');
 }

@@ -139,6 +139,10 @@ export default function InvoicesScreen() {
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
 
+  // ── Printing State ────────────────────────────────────────────────────────
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printStatus, setPrintStatus] = useState('Printing receipt...');
+
   // Load shop & plan on mount
   useEffect(() => {
     (async () => {
@@ -420,10 +424,19 @@ export default function InvoicesScreen() {
       return;
     }
 
+    setIsPrinting(true);
+    setPrintStatus(
+      action === 'bluetooth'
+        ? 'Connecting to Bluetooth POS...'
+        : action === 'system'
+        ? 'Opening System Print...'
+        : 'Generating PDF...'
+    );
+
     try {
       const data = buildReceiptData(inv);
       if (action === 'bluetooth') {
-        await printViaBluetoothPos(data, size);
+        await printViaBluetoothPos(data, size, (status) => setPrintStatus(status));
       } else if (action === 'system') {
         await printReceipt(data, size);
       } else {
@@ -441,6 +454,8 @@ export default function InvoicesScreen() {
       }
     } catch (err: any) {
       showToast(err.message ?? 'Failed to print/export receipt', 'error');
+    } finally {
+      setIsPrinting(false);
     }
   }
 
@@ -1265,6 +1280,17 @@ export default function InvoicesScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Printing Loading Overlay Modal */}
+      <Modal visible={isPrinting} transparent animationType="fade">
+        <View style={styles.printLoadingOverlay}>
+          <View style={styles.printLoadingCard}>
+            <ActivityIndicator size="large" color={colors.dsPrimary} />
+            <Text style={styles.printLoadingTitle}>Printing in progress</Text>
+            <Text style={styles.printLoadingSub}>{printStatus}</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1909,5 +1935,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     paddingTop: spacing.xs,
+  },
+  printLoadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.lg,
+  },
+  printLoadingCard: {
+    backgroundColor: colors.white,
+    paddingVertical: 24,
+    paddingHorizontal: 28,
+    borderRadius: radii.xl,
+    alignItems: 'center',
+    minWidth: 230,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  printLoadingTitle: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: fontSizes.md,
+    color: colors.dsOnSurface,
+    marginTop: 14,
+  },
+  printLoadingSub: {
+    fontFamily: 'Inter-Regular',
+    fontSize: fontSizes.xs,
+    color: colors.dsOutline,
+    marginTop: 6,
+    textAlign: 'center',
   },
 });
