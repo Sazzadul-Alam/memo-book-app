@@ -142,6 +142,10 @@ export default function InvoicesScreen() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [stats, setStats] = useState({ total: 0, paid: 0, issued: 0, revenue: 0 });
 
+  // ── Multi-Select Mode ─────────────────────────────────────────────────────
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
+
   // ── Preview Modal State ───────────────────────────────────────────────────
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
@@ -474,6 +478,74 @@ export default function InvoicesScreen() {
 
   function promptPrintOptions(inv: Invoice) {
     directPrintInvoice(inv);
+  }
+
+  function toggleInvoiceSelection(invId: string) {
+    setSelectedInvoiceIds((prev) =>
+      prev.includes(invId) ? prev.filter((id) => id !== invId) : [...prev, invId]
+    );
+  }
+
+  function selectAllInvoices() {
+    if (selectedInvoiceIds.length === filteredInvoices.length) {
+      setSelectedInvoiceIds([]);
+    } else {
+      setSelectedInvoiceIds(filteredInvoices.map((i) => i._id));
+    }
+  }
+
+  async function handleBatchPrintSelected() {
+    if (selectedInvoiceIds.length === 0) {
+      showToast('No invoices selected to print', 'info');
+      return;
+    }
+
+    const exportPdfAllowed = userPlan?.features?.exportPdf !== false;
+    if (userPlan?.name?.toLowerCase().includes('free') && !exportPdfAllowed) {
+      Alert.alert(
+        'Upgrade Required',
+        'PDF Export and Thermal Printing is locked on the Free Plan. Please upgrade your subscription from the Buy Plan tab.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const selectedInvoices = invoices.filter((i) => selectedInvoiceIds.includes(i._id));
+    const savedSize = await getSavedPaperSize();
+
+    setIsPrinting(true);
+    let printedCount = 0;
+
+    try {
+      for (let i = 0; i < selectedInvoices.length; i++) {
+        const inv = selectedInvoices[i];
+        setPrintStatus(`Printing receipt ${i + 1} of ${selectedInvoices.length} (#${inv.invoiceNumber})...`);
+
+        const data = buildReceiptData(inv);
+        await printViaBluetoothPos(data, savedSize, (status) =>
+          setPrintStatus(`(${i + 1}/${selectedInvoices.length}) ${status}`)
+        );
+        printedCount++;
+
+        // Mark as printed
+        if (inv.status !== 'printed' && isOnline && shop?._id) {
+          try {
+            await authedPatch('/invoice', `/shop/${shop._id}/${inv._id}`, { status: 'printed' });
+            setInvoices((prev) =>
+              prev.map((it) => (it._id === inv._id ? { ...it, status: 'printed' } : it))
+            );
+          } catch {}
+        }
+      }
+
+      showToast(`Successfully printed ${printedCount} receipts!`, 'success');
+      setIsSelectionMode(false);
+      setSelectedInvoiceIds([]);
+    } catch (err: any) {
+      showToast(`Batch print stopped at ${printedCount}/${selectedInvoices.length}: ${err.message}`, 'error');
+    } finally {
+      setIsPrinting(false);
+    }
   }
 
   async function handleMarkPaid(inv: Invoice) {
@@ -909,13 +981,82 @@ export default function InvoicesScreen() {
             </View>
           </View>
 
-          {/* Search & Filters */}
+          {/* Search & Filters & Batch Actions */}
           <Input
             placeholder="Search invoice number or customer..."
             value={historySearch}
             onChangeText={setHistorySearch}
             leftIcon="search-outline"
           />
+
+          {/* Batch Print Controls Bar */}
+          <View style={styles.batchControlsBar}>
+            {isSelectionMode ? (
+              <View style={styles.batchActiveRow}>
+                <TouchableOpacity
+                  style={styles.batchSelectAllBtn}
+                  onPress={selectAllInvoices}
+                >
+                  <Ionicons
+                    name={
+                      selectedInvoiceIds.length === filteredInvoices.length && filteredInvoices.length > 0
+                        ? 'checkbox'
+                        : 'square-outline'
+                    }
+                    size={20}
+                    color={colors.dsPrimary}
+                  />
+                  <Text style={styles.batchSelectAllText}>
+                    {selectedInvoiceIds.length === filteredInvoices.length && filteredInvoices.length > 0
+                      ? 'Deselect All'
+                      : `Select All (${filteredInvoices.length})`}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={styles.batchActionsGroup}>
+                  <TouchableOpacity
+                    style={[
+                      styles.batchPrintBtn,
+                      selectedInvoiceIds.length === 0 && { opacity: 0.5 },
+                    ]}
+                    disabled={selectedInvoiceIds.length === 0}
+                    onPress={handleBatchPrintSelected}
+                  >
+                    <Ionicons name="print" size={16} color={colors.white} />
+                    <Text style={styles.batchPrintBtnText}>
+                      Print Selected ({selectedInvoiceIds.length})
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.batchCancelBtn}
+                    onPress={() => {
+                      setIsSelectionMode(false);
+                      setSelectedInvoiceIds([]);
+                    }}
+                  >
+                    <Ionicons name="close" size={18} color={colors.dsOutline} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.batchInactiveRow}>
+                <Text style={styles.batchInactiveHint}>
+                  {filteredInvoices.length} invoice(s)
+                </Text>
+                <TouchableOpacity
+                  style={styles.enableSelectModeBtn}
+                  onPress={() => {
+                    setIsSelectionMode(true);
+                    setSelectedInvoiceIds([]);
+                  }}
+                >
+                  <Ionicons name="checkmark-circle-outline" size={16} color={colors.dsPrimary} />
+                  <Text style={styles.enableSelectModeText}>Multiple Select</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
             {['all', 'issued', 'paid', 'printed', 'draft'].map((s) => (
@@ -956,99 +1097,137 @@ export default function InvoicesScreen() {
               </Text>
             </View>
           ) : (
-            filteredInvoices.map((inv) => (
-              <Card key={inv._id} style={styles.invoiceCard}>
-                <View style={styles.invCardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.invNumber}>#{inv.invoiceNumber}</Text>
-                    <Text style={styles.invDate}>
-                      {new Date(inv.createdAt).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  <Badge
-                    label={inv.status.toUpperCase()}
-                    variant={
-                      inv.status === 'paid'
-                        ? 'success'
-                        : inv.status === 'printed'
-                        ? 'neutral'
-                        : inv.status === 'issued'
-                        ? 'primary'
-                        : 'error'
+            filteredInvoices.map((inv) => {
+              const isSelected = selectedInvoiceIds.includes(inv._id);
+              return (
+                <TouchableOpacity
+                  key={inv._id}
+                  activeOpacity={isSelectionMode ? 0.7 : 1}
+                  onPress={() => {
+                    if (isSelectionMode) {
+                      toggleInvoiceSelection(inv._id);
                     }
-                  />
-                </View>
-
-                {inv.customerName || inv.customerPhone ? (
-                  <View style={styles.invCustomerInfo}>
-                    <Ionicons name="person-outline" size={14} color={colors.dsOutline} />
-                    <Text style={styles.invCustomerText}>
-                      {inv.customerName || 'Customer'}
-                      {inv.customerPhone ? ` • ${inv.customerPhone}` : ''}
-                    </Text>
-                  </View>
-                ) : null}
-
-                <View style={styles.invItemsPreview}>
-                  <Text style={styles.invItemsCount}>{inv.items?.length ?? 0} item(s)</Text>
-                  <Text style={styles.invTotalAmount}>৳{inv.grandTotal.toFixed(2)}</Text>
-                </View>
-
-                {/* Card Action Buttons */}
-                <View style={styles.invActionsRow}>
-                  <TouchableOpacity
-                    style={styles.actionBtnPill}
-                    onPress={() => {
-                      setPreviewInvoice(inv);
-                      setPreviewModalVisible(true);
-                    }}
-                  >
-                    <Ionicons name="eye-outline" size={16} color={colors.dsPrimary} />
-                    <Text style={styles.actionBtnPillText}>Preview</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
+                  }}
+                >
+                  <Card
                     style={[
-                      styles.actionBtnPill,
-                      { borderColor: colors.dsPrimary, backgroundColor: '#E0F2FE' },
+                      styles.invoiceCard,
+                      isSelected && styles.invoiceCardSelected,
                     ]}
-                    onPress={() => promptPrintOptions(inv)}
                   >
-                    <Ionicons name="print-outline" size={16} color={colors.dsPrimary} />
-                    <Text style={[styles.actionBtnPillText, { color: colors.dsPrimary, fontWeight: '700' }]}>
-                      Print
-                    </Text>
-                  </TouchableOpacity>
+                    <View style={styles.invCardHeader}>
+                      {isSelectionMode ? (
+                        <TouchableOpacity
+                          style={styles.cardCheckbox}
+                          onPress={() => toggleInvoiceSelection(inv._id)}
+                        >
+                          <Ionicons
+                            name={isSelected ? 'checkbox' : 'square-outline'}
+                            size={22}
+                            color={isSelected ? colors.dsPrimary : colors.dsOutline}
+                          />
+                        </TouchableOpacity>
+                      ) : null}
 
-                  <TouchableOpacity
-                    style={styles.actionBtnPill}
-                    onPress={() => handlePrintOrShare(inv, 'share')}
-                  >
-                    <Ionicons name="share-social-outline" size={16} color={colors.dsOutline} />
-                    <Text style={styles.actionBtnPillText}>Share</Text>
-                  </TouchableOpacity>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.invNumber}>#{inv.invoiceNumber}</Text>
+                        <Text style={styles.invDate}>
+                          {new Date(inv.createdAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                      <Badge
+                        label={inv.status.toUpperCase()}
+                        variant={
+                          inv.status === 'paid'
+                            ? 'success'
+                            : inv.status === 'printed'
+                            ? 'neutral'
+                            : inv.status === 'issued'
+                            ? 'primary'
+                            : 'error'
+                        }
+                      />
+                    </View>
 
-                  {inv.status !== 'paid' && isOnline ? (
-                    <TouchableOpacity
-                      style={[styles.actionBtnPill, { borderColor: '#16a34a' }]}
-                      onPress={() => handleMarkPaid(inv)}
-                    >
-                      <Ionicons name="checkmark-done" size={16} color="#16a34a" />
-                      <Text style={[styles.actionBtnPillText, { color: '#16a34a' }]}>Mark Paid</Text>
-                    </TouchableOpacity>
-                  ) : null}
+                    {inv.customerName || inv.customerPhone ? (
+                      <View style={styles.invCustomerInfo}>
+                        <Ionicons name="person-outline" size={14} color={colors.dsOutline} />
+                        <Text style={styles.invCustomerText}>
+                          {inv.customerName || 'Customer'}
+                          {inv.customerPhone ? ` • ${inv.customerPhone}` : ''}
+                        </Text>
+                      </View>
+                    ) : null}
 
-                  {isOnline ? (
-                    <TouchableOpacity
-                      style={[styles.actionBtnPill, { borderColor: colors.dsError }]}
-                      onPress={() => confirmDelete(inv)}
-                    >
-                      <Ionicons name="trash-outline" size={16} color={colors.dsError} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </Card>
-            ))
+                    <View style={styles.invItemsPreview}>
+                      <Text style={styles.invItemsCount}>{inv.items?.length ?? 0} item(s)</Text>
+                      <Text style={styles.invTotalAmount}>৳{inv.grandTotal.toFixed(2)}</Text>
+                    </View>
+
+                    {/* Card Action Buttons */}
+                    <View style={styles.invActionsRow}>
+                      <TouchableOpacity
+                        style={styles.actionBtnPill}
+                        onPress={() => {
+                          setPreviewInvoice(inv);
+                          setPreviewModalVisible(true);
+                        }}
+                      >
+                        <Ionicons name="eye-outline" size={16} color={colors.dsPrimary} />
+                        <Text style={styles.actionBtnPillText}>Preview</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.actionBtnPill,
+                          { borderColor: colors.dsPrimary, backgroundColor: '#E0F2FE' },
+                        ]}
+                        onPress={() => promptPrintOptions(inv)}
+                      >
+                        <Ionicons name="print-outline" size={16} color={colors.dsPrimary} />
+                        <Text
+                          style={[
+                            styles.actionBtnPillText,
+                            { color: colors.dsPrimary, fontWeight: '700' },
+                          ]}
+                        >
+                          Print
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.actionBtnPill}
+                        onPress={() => handlePrintOrShare(inv, 'share')}
+                      >
+                        <Ionicons name="share-social-outline" size={16} color={colors.dsOutline} />
+                        <Text style={styles.actionBtnPillText}>Share</Text>
+                      </TouchableOpacity>
+
+                      {inv.status !== 'paid' && isOnline ? (
+                        <TouchableOpacity
+                          style={[styles.actionBtnPill, { borderColor: '#16a34a' }]}
+                          onPress={() => handleMarkPaid(inv)}
+                        >
+                          <Ionicons name="checkmark-done" size={16} color="#16a34a" />
+                          <Text style={[styles.actionBtnPillText, { color: '#16a34a' }]}>
+                            Mark Paid
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {isOnline ? (
+                        <TouchableOpacity
+                          style={[styles.actionBtnPill, { borderColor: colors.dsError }]}
+                          onPress={() => confirmDelete(inv)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={colors.dsError} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </Card>
+                </TouchableOpacity>
+              );
+            })
           )}
         </ScrollView>
       )}
@@ -1578,6 +1757,89 @@ const styles = StyleSheet.create({
     color: colors.dsOutline,
     marginTop: 2,
     textTransform: 'uppercase',
+  },
+  batchControlsBar: {
+    marginVertical: spacing.xs,
+  },
+  batchInactiveRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 2,
+  },
+  batchInactiveHint: {
+    fontFamily: 'Inter-Medium',
+    fontSize: fontSizes.xs,
+    color: colors.dsOutline,
+  },
+  enableSelectModeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+    backgroundColor: '#E0F2F1',
+  },
+  enableSelectModeText: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 11,
+    color: colors.dsPrimary,
+  },
+  batchActiveRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    padding: 8,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.dsPrimary,
+    gap: 8,
+  },
+  batchSelectAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  batchSelectAllText: {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: fontSizes.xs,
+    color: colors.dsPrimary,
+  },
+  batchActionsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  batchPrintBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.dsPrimary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.sm,
+  },
+  batchPrintBtnText: {
+    fontFamily: 'Manrope-Bold',
+    fontSize: 11,
+    color: colors.white,
+  },
+  batchCancelBtn: {
+    padding: 6,
+    borderRadius: radii.sm,
+    backgroundColor: colors.dsSurfaceContainer,
+  },
+  cardCheckbox: {
+    marginRight: 8,
+    padding: 2,
+  },
+  invoiceCardSelected: {
+    borderColor: colors.dsPrimary,
+    borderWidth: 1.5,
+    backgroundColor: '#F0FDFA',
   },
   chipsScroll: {
     flexDirection: 'row',
