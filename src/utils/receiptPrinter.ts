@@ -435,11 +435,12 @@ export function generateReceiptHtml(data: ReceiptData, paperSize: PaperSize = '5
 export async function printViaBluetoothPos(
   data: ReceiptData,
   paperSize: PaperSize = '58mm',
-  onStatusUpdate?: (status: string) => void
+  onStatusUpdate?: (status: string) => void,
+  targetAddress?: string
 ): Promise<boolean> {
   try {
     const { printReceiptBluetooth } = require('./bluetoothPrinter');
-    await printReceiptBluetooth(data, paperSize, undefined, onStatusUpdate);
+    await printReceiptBluetooth(data, paperSize, targetAddress, onStatusUpdate);
     return true;
   } catch (err: any) {
     if (err?.message === 'NO_PRINTER_PAIRED') {

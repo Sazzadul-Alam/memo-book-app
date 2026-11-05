@@ -10,6 +10,7 @@ import ThermalPrinter, {
 import { type ReceiptData, type PaperSize } from './receiptPrinter';
 
 const SAVED_PRINTER_KEY = '@memobook_saved_pos_printer';
+const SAVED_PRINTER_NAME_KEY = '@memobook_saved_pos_printer_name';
 
 export interface PrinterDevice {
   name: string;
@@ -95,7 +96,7 @@ export async function scanPrinters(quickStopMs = 1200): Promise<{ paired: Printe
 /**
  * Connect to a Bluetooth printer using its address
  */
-export async function connectPrinter(address: string): Promise<boolean> {
+export async function connectPrinter(address: string, name?: string): Promise<boolean> {
   try {
     await requestBluetoothPermissions();
 
@@ -106,6 +107,9 @@ export async function connectPrinter(address: string): Promise<boolean> {
 
     await ThermalPrinter.connect(formattedAddress, { timeout: 4000 });
     await AsyncStorage.setItem(SAVED_PRINTER_KEY, address);
+    if (name) {
+      await AsyncStorage.setItem(SAVED_PRINTER_NAME_KEY, name);
+    }
     return true;
   } catch (err: any) {
     console.error('Printer connect error:', err);
@@ -114,11 +118,32 @@ export async function connectPrinter(address: string): Promise<boolean> {
 }
 
 /**
- * Get the last saved printer address from AsyncStorage
+ * Set and save the active printer
+ */
+export async function setActivePrinter(address: string, name?: string): Promise<void> {
+  await AsyncStorage.setItem(SAVED_PRINTER_KEY, address);
+  if (name) {
+    await AsyncStorage.setItem(SAVED_PRINTER_NAME_KEY, name);
+  }
+}
+
+/**
+ * Get the last saved printer address and name from AsyncStorage
  */
 export async function getSavedPrinter(): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(SAVED_PRINTER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export async function getSavedPrinterDetails(): Promise<{ address: string; name: string } | null> {
+  try {
+    const address = await AsyncStorage.getItem(SAVED_PRINTER_KEY);
+    if (!address) return null;
+    const name = (await AsyncStorage.getItem(SAVED_PRINTER_NAME_KEY)) || 'Bluetooth POS Printer';
+    return { address, name };
   } catch {
     return null;
   }
@@ -129,7 +154,7 @@ export async function getSavedPrinter(): Promise<string | null> {
  */
 export async function clearSavedPrinter(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(SAVED_PRINTER_KEY);
+    await AsyncStorage.multiRemove([SAVED_PRINTER_KEY, SAVED_PRINTER_NAME_KEY]);
   } catch {}
 }
 
@@ -177,6 +202,9 @@ export async function printReceiptBluetooth(
       address = all[0].address;
       // Persist for next instant print
       AsyncStorage.setItem(SAVED_PRINTER_KEY, address).catch(() => {});
+      if (all[0].name) {
+        AsyncStorage.setItem(SAVED_PRINTER_NAME_KEY, all[0].name).catch(() => {});
+      }
     } else {
       throw new Error('NO_PRINTER_PAIRED');
     }
