@@ -11,6 +11,7 @@ import { type ReceiptData, type PaperSize } from './receiptPrinter';
 
 const SAVED_PRINTER_KEY = '@memobook_saved_pos_printer';
 const SAVED_PRINTER_NAME_KEY = '@memobook_saved_pos_printer_name';
+const SAVED_PAPER_SIZE_KEY = '@memobook_saved_paper_size';
 
 export interface PrinterDevice {
   name: string;
@@ -128,6 +129,22 @@ export async function setActivePrinter(address: string, name?: string): Promise<
 }
 
 /**
+ * Set and get default paper size
+ */
+export async function setSavedPaperSize(size: PaperSize): Promise<void> {
+  await AsyncStorage.setItem(SAVED_PAPER_SIZE_KEY, size);
+}
+
+export async function getSavedPaperSize(): Promise<PaperSize> {
+  try {
+    const size = await AsyncStorage.getItem(SAVED_PAPER_SIZE_KEY);
+    return size === '80mm' ? '80mm' : '58mm';
+  } catch {
+    return '58mm';
+  }
+}
+
+/**
  * Get the last saved printer address and name from AsyncStorage
  */
 export async function getSavedPrinter(): Promise<string | null> {
@@ -182,7 +199,7 @@ export async function disconnectPrinter(address: string): Promise<void> {
  */
 export async function printReceiptBluetooth(
   data: ReceiptData,
-  paperSize: PaperSize = '58mm',
+  paperSize?: PaperSize,
   targetAddress?: string,
   onStatusUpdate?: (status: string) => void
 ): Promise<void> {
@@ -210,6 +227,8 @@ export async function printReceiptBluetooth(
     }
   }
 
+  const effectivePaperSize = paperSize || (await getSavedPaperSize());
+
   const formattedAddress =
     address.startsWith('bt:') || address.startsWith('ble:') || address.startsWith('tcp:')
       ? address
@@ -233,8 +252,8 @@ export async function printReceiptBluetooth(
 
   onStatusUpdate?.('Sending print commands...');
 
-  const paperWidthMm = paperSize === '80mm' ? 80 : 58;
-  const is80 = paperSize === '80mm';
+  const paperWidthMm = effectivePaperSize === '80mm' ? 80 : 58;
+  const is80 = effectivePaperSize === '80mm';
 
   // Build ESC/POS print nodes
   const nodes: any[] = [];

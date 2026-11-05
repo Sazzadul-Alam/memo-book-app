@@ -37,6 +37,7 @@ import {
   scanPrinters,
   getSavedPrinterDetails,
   setActivePrinter,
+  getSavedPaperSize,
   PrinterDevice,
 } from '../../src/utils/bluetoothPrinter';
 
@@ -148,10 +149,6 @@ export default function InvoicesScreen() {
   // ── Printing State ────────────────────────────────────────────────────────
   const [isPrinting, setIsPrinting] = useState(false);
   const [printStatus, setPrintStatus] = useState('Printing receipt...');
-  const [printerSelectionModal, setPrinterSelectionModal] = useState(false);
-  const [availablePrinters, setAvailablePrinters] = useState<PrinterDevice[]>([]);
-  const [scanningPrinters, setScanningPrinters] = useState(false);
-  const [pendingPrintInvoice, setPendingPrintInvoice] = useState<{ inv: Invoice; size: PaperSize } | null>(null);
 
   // Load shop & plan on mount
   useEffect(() => {
@@ -470,64 +467,13 @@ export default function InvoicesScreen() {
     }
   }
 
-  async function startBluetoothPrintFlow(inv: Invoice, size: PaperSize) {
-    try {
-      // Check if we have multiple paired devices or if user wants to select
-      setScanningPrinters(true);
-      const { paired, found } = await scanPrinters(1200);
-      const devices = [...paired, ...found];
-      
-      // Deduplicate devices by address
-      const uniqueDevices: PrinterDevice[] = [];
-      const seen = new Set<string>();
-      for (const d of devices) {
-        if (!seen.has(d.address)) {
-          seen.add(d.address);
-          uniqueDevices.push(d);
-        }
-      }
-
-      if (uniqueDevices.length > 1) {
-        // Multiple printers found! Open picker modal so user can choose which printer
-        setAvailablePrinters(uniqueDevices);
-        setPendingPrintInvoice({ inv, size });
-        setPrinterSelectionModal(true);
-      } else if (uniqueDevices.length === 1) {
-        // Only 1 printer found, print immediately
-        await setActivePrinter(uniqueDevices[0].address, uniqueDevices[0].name);
-        await handlePrintOrShare(inv, 'bluetooth', size, uniqueDevices[0].address);
-      } else {
-        // Fallback to standard print which handles NO_PRINTER_PAIRED error gracefully
-        await handlePrintOrShare(inv, 'bluetooth', size);
-      }
-    } catch (err: any) {
-      // Fallback
-      await handlePrintOrShare(inv, 'bluetooth', size);
-    } finally {
-      setScanningPrinters(false);
-    }
+  async function directPrintInvoice(inv: Invoice) {
+    const savedSize = await getSavedPaperSize();
+    await handlePrintOrShare(inv, 'bluetooth', savedSize);
   }
 
   function promptPrintOptions(inv: Invoice) {
-    Alert.alert(
-      `Print Invoice #${inv.invoiceNumber}`,
-      'Select thermal printing method for your Bluetooth POS machine or printer:',
-      [
-        {
-          text: '🖨️ Bluetooth POS (58mm Roll)',
-          onPress: () => startBluetoothPrintFlow(inv, '58mm'),
-        },
-        {
-          text: '🖨️ Bluetooth POS (80mm Roll)',
-          onPress: () => startBluetoothPrintFlow(inv, '80mm'),
-        },
-        {
-          text: '📄 Android System Spooler',
-          onPress: () => handlePrintOrShare(inv, 'system', paperSize),
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]
-    );
+    directPrintInvoice(inv);
   }
 
   async function handleMarkPaid(inv: Invoice) {
@@ -1304,11 +1250,11 @@ export default function InvoicesScreen() {
             {/* Modal Actions */}
             <View style={styles.modalActions}>
               <Button
-                title={`Bluetooth POS (${paperSize})`}
+                title={`Bluetooth POS`}
                 leftIcon="bluetooth-outline"
                 style={{ flex: 1.3 }}
                 onPress={() =>
-                  previewInvoice && startBluetoothPrintFlow(previewInvoice, paperSize)
+                  previewInvoice && directPrintInvoice(previewInvoice)
                 }
               />
               <Button
@@ -1337,68 +1283,6 @@ export default function InvoicesScreen() {
             <ActivityIndicator size="large" color={colors.dsPrimary} />
             <Text style={styles.printLoadingTitle}>Printing in progress</Text>
             <Text style={styles.printLoadingSub}>{printStatus}</Text>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Select POS Printer Modal (when multiple Bluetooth devices found) */}
-      <Modal
-        visible={printerSelectionModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setPrinterSelectionModal(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.printerModalContainer}>
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Choose POS Printer</Text>
-                <Text style={styles.printerModalSub}>Multiple Bluetooth printers found. Select one to print:</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setPrinterSelectionModal(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={24} color={colors.dsOutline} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={{ maxHeight: 300, marginVertical: spacing.sm }}>
-              {availablePrinters.map((printer, idx) => (
-                <TouchableOpacity
-                  key={printer.address || idx}
-                  style={styles.printerOptionItem}
-                  onPress={async () => {
-                    setPrinterSelectionModal(false);
-                    if (pendingPrintInvoice) {
-                      await setActivePrinter(printer.address, printer.name);
-                      await handlePrintOrShare(
-                        pendingPrintInvoice.inv,
-                        'bluetooth',
-                        pendingPrintInvoice.size,
-                        printer.address
-                      );
-                    }
-                  }}
-                >
-                  <View style={styles.printerIconCircle}>
-                    <Ionicons name="print-outline" size={20} color={colors.dsPrimary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.printerItemName}>{printer.name || 'Unknown POS Printer'}</Text>
-                    <Text style={styles.printerItemAddr}>{printer.address}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.dsOutline} />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <Button
-              title="Cancel"
-              variant="outline"
-              fullWidth
-              onPress={() => setPrinterSelectionModal(false)}
-            />
           </View>
         </View>
       </Modal>
@@ -1801,15 +1685,16 @@ const styles = StyleSheet.create({
   invActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
+    gap: 6,
+    marginTop: 6,
+    flexWrap: 'wrap',
   },
   actionBtnPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     borderRadius: radii.sm,
     borderWidth: 1,
     borderColor: colors.dsOutlineVariant,
@@ -1817,7 +1702,7 @@ const styles = StyleSheet.create({
   },
   actionBtnPillText: {
     fontFamily: 'Inter-Medium',
-    fontSize: 11,
+    fontSize: 10,
     color: colors.dsPrimary,
   },
   modalBackdrop: {
@@ -2079,48 +1964,5 @@ const styles = StyleSheet.create({
     color: colors.dsOutline,
     marginTop: 6,
     textAlign: 'center',
-  },
-  printerModalContainer: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
-    maxHeight: '80%',
-    padding: spacing.md,
-  },
-  printerModalSub: {
-    fontFamily: 'Inter-Regular',
-    fontSize: fontSizes.xs,
-    color: colors.dsOutline,
-    marginTop: 2,
-  },
-  printerOptionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: spacing.sm,
-    backgroundColor: colors.dsSurfaceContainerLowest,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.dsOutlineVariant,
-    marginBottom: spacing.xs,
-  },
-  printerIconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E0F2F1',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  printerItemName: {
-    fontFamily: 'Manrope-Bold',
-    fontSize: fontSizes.sm,
-    color: colors.dsOnSurface,
-  },
-  printerItemAddr: {
-    fontFamily: 'Inter-Regular',
-    fontSize: fontSizes.xs,
-    color: colors.dsOutline,
-    marginTop: 1,
   },
 });

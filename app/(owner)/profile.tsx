@@ -30,7 +30,10 @@ import {
   clearSavedPrinter,
   PrinterDevice,
   requestBluetoothPermissions,
+  getSavedPaperSize,
+  setSavedPaperSize,
 } from '../../src/utils/bluetoothPrinter';
+import { PaperSize } from '../../src/utils/receiptPrinter';
 
 interface ShopInfo {
   name: string;
@@ -50,6 +53,7 @@ export default function OwnerProfileScreen() {
 
   // Bluetooth Printer states
   const [activePrinter, setActivePrinterState] = useState<{ address: string; name: string } | null>(null);
+  const [paperSize, setPaperSizeState] = useState<PaperSize>('58mm');
   const [scanningPrinters, setScanningPrinters] = useState(false);
   const [pairedPrinters, setPairedPrinters] = useState<PrinterDevice[]>([]);
   const [pickerModalVisible, setPickerModalVisible] = useState(false);
@@ -58,14 +62,16 @@ export default function OwnerProfileScreen() {
 
   const loadProfileAndPrinter = useCallback(async () => {
     try {
-      const [n, e, printer] = await Promise.all([
+      const [n, e, printer, savedSize] = await Promise.all([
         getUserName(),
         getUserEmail(),
         getSavedPrinterDetails(),
+        getSavedPaperSize(),
       ]);
       setUserName(n);
       setUserEmail(e);
       setActivePrinterState(printer);
+      setPaperSizeState(savedSize);
 
       // Fetch user shop details
       const shopRes: any = await authedGet('/shop');
@@ -214,36 +220,86 @@ export default function OwnerProfileScreen() {
 
           <View style={[styles.card, shadows.sm]}>
             {activePrinter ? (
-              <View style={styles.printerCardContent}>
-                <View style={styles.printerIconWrap}>
-                  <Ionicons name="print" size={24} color={colors.dsPrimary} />
-                  <View style={styles.connectedDot} />
-                </View>
-
-                <View style={styles.printerInfo}>
-                  <View style={styles.printerTitleRow}>
-                    <Text style={styles.printerName} numberOfLines={1}>
-                      {activePrinter.name || 'Bluetooth POS Printer'}
-                    </Text>
-                    <Badge variant="success" style={styles.statusBadge}>
-                      Connected
-                    </Badge>
+              <View>
+                <View style={styles.printerCardContent}>
+                  <View style={styles.printerIconWrap}>
+                    <Ionicons name="print" size={24} color={colors.dsPrimary} />
+                    <View style={styles.connectedDot} />
                   </View>
-                  <Text style={styles.printerAddress}>
-                    MAC: {activePrinter.address}
-                  </Text>
-                  <Text style={styles.printerHint}>
-                    Receipts will print instantly from this machine
-                  </Text>
+
+                  <View style={styles.printerInfo}>
+                    <View style={styles.printerTitleRow}>
+                      <Text style={styles.printerName} numberOfLines={1}>
+                        {activePrinter.name || 'Bluetooth POS Printer'}
+                      </Text>
+                      <Badge variant="success" style={styles.statusBadge}>
+                        Connected
+                      </Badge>
+                    </View>
+                    <Text style={styles.printerAddress}>
+                      MAC: {activePrinter.address}
+                    </Text>
+                    <Text style={styles.printerHint}>
+                      Receipts will print directly without any extra prompts
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={handleForgetPrinter}
+                    style={styles.disconnectBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.destructive} />
+                  </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity
-                  onPress={handleForgetPrinter}
-                  style={styles.disconnectBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.destructive} />
-                </TouchableOpacity>
+                {/* Roll Size Settings */}
+                <View style={styles.divider} />
+                <View style={styles.paperSizeSettingsRow}>
+                  <Text style={styles.paperSizeLabel}>Paper Roll Size:</Text>
+                  <View style={styles.paperSizeButtons}>
+                    <TouchableOpacity
+                      style={[
+                        styles.sizeChip,
+                        paperSize === '58mm' && styles.sizeChipActive,
+                      ]}
+                      onPress={async () => {
+                        setPaperSizeState('58mm');
+                        await setSavedPaperSize('58mm');
+                        showToast('Default roll set to 58mm', 'info');
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.sizeChipText,
+                          paperSize === '58mm' && styles.sizeChipTextActive,
+                        ]}
+                      >
+                        58mm
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.sizeChip,
+                        paperSize === '80mm' && styles.sizeChipActive,
+                      ]}
+                      onPress={async () => {
+                        setPaperSizeState('80mm');
+                        await setSavedPaperSize('80mm');
+                        showToast('Default roll set to 80mm', 'info');
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.sizeChipText,
+                          paperSize === '80mm' && styles.sizeChipTextActive,
+                        ]}
+                      >
+                        80mm
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             ) : (
               <View style={styles.noPrinterContent}>
@@ -253,7 +309,7 @@ export default function OwnerProfileScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.noPrinterTitle}>No POS Printer Connected</Text>
                   <Text style={styles.noPrinterDesc}>
-                    Tap Connect to discover your Bluetooth thermal printer
+                    Tap Connect to select your Bluetooth POS machine once
                   </Text>
                 </View>
                 <TouchableOpacity
@@ -544,6 +600,42 @@ const styles = StyleSheet.create({
   },
   disconnectBtn: {
     padding: 6,
+  },
+  paperSizeSettingsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: spacing[2],
+  },
+  paperSizeLabel: {
+    fontFamily: 'Inter-Medium',
+    fontSize: fontSizes.xs,
+    color: colors.dsOnSurface,
+  },
+  paperSizeButtons: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  sizeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: colors.dsOutlineVariant,
+    backgroundColor: colors.dsSurfaceContainerLowest,
+  },
+  sizeChipActive: {
+    backgroundColor: colors.dsPrimary,
+    borderColor: colors.dsPrimary,
+  },
+  sizeChipText: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 11,
+    color: colors.dsOutline,
+  },
+  sizeChipTextActive: {
+    fontFamily: 'Inter-Bold',
+    color: colors.white,
   },
   noPrinterContent: {
     flexDirection: 'row',
